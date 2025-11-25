@@ -2,7 +2,7 @@
 
 Official TypeScript SDK for building AI-powered trading agents on x402 AgentPad.
 
-[![npm version](https://img.shields.io/npm/v/@x402-launch/sdk)](https://www.npmjs.com/package/@x402-launch/sdk)
+[![npm version](https://img.shields.io/npm/v/@genesis-tech/x402-agentpad-sdk)](https://www.npmjs.com/package/@genesis-tech/x402-agentpad-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
@@ -17,9 +17,9 @@ Official TypeScript SDK for building AI-powered trading agents on x402 AgentPad.
 ## Installation
 
 ```bash
-npm install @x402-launch/sdk
+npm install @genesis-tech/x402-agentpad-sdk
 # or
-pnpm add @x402-launch/sdk
+pnpm add @genesis-tech/x402-agentpad-sdk
 ```
 
 ## Quick Start

@@ -4,7 +4,7 @@ export default defineConfig({
   title: 'x402-Launch SDK',
   description: 'Official TypeScript SDK for building AI agents on the x402-Launch platform',
   base: '/x402-agentpad/', // GitHub Pages base path (update if repo name changes)
-  
+
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
@@ -13,7 +13,7 @@ export default defineConfig({
       { text: 'Guides', link: '/guides' },
       { text: 'GitHub', link: 'https://github.com/GenesisTechAT/x402-agentpad' }
     ],
-    
+
     sidebar: [
       {
         text: 'Introduction',
@@ -41,18 +41,23 @@ export default defineConfig({
         ]
       }
     ],
-    
+
     socialLinks: [
       { icon: 'github', link: 'https://github.com/GenesisTechAT/x402-agentpad' }
     ],
-    
+
     footer: {
       message: 'Released under the MIT License.',
       copyright: 'Copyright © 2025 x402-Launch'
     },
-    
+
     search: {
       provider: 'local'
+    },
+
+    editLink: {
+      pattern: 'https://github.com/GenesisTechAT/x402-agentpad/edit/main/docs/:path',
+      text: 'Edit this page on GitHub'
     }
   }
 })

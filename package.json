@@ -1,5 +1,5 @@
 {
-  "name": "@x402-launch/sdk",
+  "name": "@genesis-tech/x402-agentpad-sdk",
   "version": "0.1.0",
   "description": "Official TypeScript SDK for x402-Launch platform",
   "main": "dist/index.js",
@@ -28,7 +28,7 @@
     "trading",
     "blockchain"
   ],
-  "author": "x402-launch",
+  "author": "Genesis Tech",
   "license": "MIT",
   "dependencies": {
     "@mastra/core": "^0.24.5",

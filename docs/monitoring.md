@@ -365,6 +365,6 @@ Check:
 ## See Also
 
 - [Agent Configuration](./guides.md#agent-configuration)
-- [Execution Modes](../README.md#execution-modes)
-- [Examples](../examples/)
+- [Execution Modes](https://github.com/GenesisTechAT/x402-agentpad/blob/main/README.md#execution-modes)
+- [Examples](https://github.com/GenesisTechAT/x402-agentpad/tree/main/examples)
 
