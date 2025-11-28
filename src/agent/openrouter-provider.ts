@@ -94,7 +94,7 @@ export class OpenRouterProvider implements IAIModelProvider {
   ) {
     this.config = {
       baseUrl: 'https://openrouter.ai/api/v1',
-      routingStrategy: 'primary-fallback',
+      // routingStrategy is handled by ...config below
       enableFallback: true,
       maxRetriesPerModel: 2,
       ...config,
