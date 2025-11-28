@@ -8,6 +8,8 @@
  * - Balance monitoring
  * - Error handling
  * - Lifecycle management
+ * - Dynamic interval adjustment
+ * - Action priority management
  */
 
 import { ethers } from 'ethers';
@@ -19,14 +21,22 @@ import {
   AgentDecision,
   AgentExecutionResult,
   AgentLifecycleHooks,
+  ActionTracker,
+  DynamicIntervalConfig,
+  ActionPriority,
+  EXECUTION_PRESETS,
+  ExecutionModePreset,
+  AgentPosition,
 } from './interfaces';
 import { X402AIProvider } from './ai-provider';
+import { OpenRouterProvider, createOpenRouterConfig } from './openrouter-provider';
 import { DashboardClient } from './dashboard-client';
 
 export class AgentRunner {
   private client: X402LaunchClient;
   private config: AgentConfig;
   private aiProvider: X402AIProvider;
+  private openRouterProvider?: OpenRouterProvider;
   private hooks: AgentLifecycleHooks;
   private dashboard?: DashboardClient;
 
@@ -39,6 +49,8 @@ export class AgentRunner {
   // Store chain config for balance queries
   private chainId: number;
   private rpcUrl: string;
+  private wallet: ethers.Wallet;
+  private ethersProvider: ethers.Provider;
 
   // USDC address by chain
   private static USDC_ADDRESSES: Record<number, string> = {
@@ -56,7 +68,8 @@ export class AgentRunner {
     },
     hooks?: AgentLifecycleHooks
   ) {
-    this.config = config;
+    // Apply execution preset if specified
+    this.config = this.applyExecutionPreset(config);
     this.hooks = hooks || {};
 
     // Initialize client
@@ -71,33 +84,133 @@ export class AgentRunner {
       rpcUrl: this.rpcUrl,
     });
 
-    // Initialize AI provider
-    const wallet = new ethers.Wallet(privateKey);
-    const provider = new ethers.JsonRpcProvider(this.rpcUrl, this.chainId);
+    // Initialize wallet and provider
+    this.wallet = new ethers.Wallet(privateKey);
+    this.ethersProvider = new ethers.JsonRpcProvider(this.rpcUrl, this.chainId);
     const usdcAddress = AgentRunner.USDC_ADDRESSES[this.chainId] || AgentRunner.USDC_ADDRESSES[84532];
 
-    this.aiProvider = new X402AIProvider(wallet, provider, this.chainId, usdcAddress);
+    // Initialize default AI provider (x402)
+    this.aiProvider = new X402AIProvider(this.wallet, this.ethersProvider, this.chainId, usdcAddress);
 
-    // Initialize state
+    // Initialize OpenRouter provider if configured
+    if (this.config.modelProvider === 'openrouter' || this.config.openRouterConfig) {
+      const openRouterConfig = this.config.openRouterConfig || createOpenRouterConfig('balanced');
+      this.openRouterProvider = new OpenRouterProvider(
+        openRouterConfig,
+        this.wallet,
+        this.ethersProvider,
+        this.chainId,
+        usdcAddress
+      );
+      console.log(`🤖 OpenRouter initialized with ${openRouterConfig.models.length} models`);
+    }
+
+    // Initialize state with new tracking fields
     this.state = {
-      config,
+      config: this.config,
       balance: '0',
       positions: [],
       executionHistory: [],
-      launchedTokens: [], // Track tokens we launched
+      launchedTokens: [],
+      // Dynamic interval state
+      currentIntervalMode: 'base',
+      fastModeExpiresAt: undefined,
+      // Action tracking
+      actionTrackers: this.initializeActionTrackers(),
+      // Performance metrics
+      totalProfitLoss: '0',
+      winCount: 0,
+      lossCount: 0,
+      totalModelCost: '0',
+      totalGasUsed: '0',
     };
 
-    // Initialize status
+    // Initialize status with new fields
     this.status = {
-      agentId: config.agentId,
+      agentId: this.config.agentId,
       status: 'stopped',
       isRunning: false,
       executionCount: 0,
+      currentIntervalMode: 'base',
+      currentIntervalMs: this.config.reviewIntervalMs,
+      totalProfitLoss: '0',
+      winRate: 0,
+      openPositions: 0,
     };
 
     // Initialize dashboard client (if URL provided)
-    if (config.dashboardUrl) {
-      this.dashboard = new DashboardClient(config.dashboardUrl, config.agentId);
+    if (this.config.dashboardUrl) {
+      this.dashboard = new DashboardClient(this.config.dashboardUrl, this.config.agentId);
+    }
+
+    // Log configuration
+    this.logConfiguration();
+  }
+
+  /**
+   * Apply execution preset to config
+   */
+  private applyExecutionPreset(config: AgentConfig): AgentConfig {
+    if (!config.executionPreset || config.executionPreset === 'custom') {
+      return config;
+    }
+
+    const preset = EXECUTION_PRESETS[config.executionPreset];
+    if (!preset) {
+      console.warn(`Unknown execution preset: ${config.executionPreset}, using config as-is`);
+      return config;
+    }
+
+    console.log(`\n🎯 Applying execution preset: ${config.executionPreset.toUpperCase()}`);
+
+    // Merge preset with user config (user config takes precedence)
+    return {
+      ...config,
+      reviewIntervalMs: config.reviewIntervalMs || preset.reviewIntervalMs || 120000,
+      dynamicInterval: config.dynamicInterval || preset.dynamicInterval,
+      actionPriorities: config.actionPriorities || preset.actionPriorities,
+    };
+  }
+
+  /**
+   * Initialize action trackers for rate limiting
+   */
+  private initializeActionTrackers(): ActionTracker[] {
+    const actions = ['buy', 'sell', 'launch', 'analyze', 'discover', 'wait'];
+    return actions.map(action => ({
+      action,
+      lastExecutedAt: 0,
+      executionsThisHour: 0,
+      hourStartedAt: Date.now(),
+    }));
+  }
+
+  /**
+   * Log configuration summary
+   */
+  private logConfiguration(): void {
+    console.log(`\n📋 Agent Configuration:`);
+    console.log(`   Agent ID: ${this.config.agentId}`);
+    console.log(`   Execution Preset: ${this.config.executionPreset || 'custom'}`);
+    console.log(`   Base Interval: ${this.config.reviewIntervalMs / 1000}s`);
+    
+    if (this.config.dynamicInterval) {
+      console.log(`   Dynamic Intervals:`);
+      console.log(`     - Fast: ${this.config.dynamicInterval.fastIntervalMs / 1000}s`);
+      console.log(`     - Base: ${this.config.dynamicInterval.baseIntervalMs / 1000}s`);
+      console.log(`     - Slow: ${this.config.dynamicInterval.slowIntervalMs / 1000}s`);
+      console.log(`   Fast Triggers: ${this.config.dynamicInterval.triggerFastOn.join(', ')}`);
+      console.log(`   Slow Triggers: ${this.config.dynamicInterval.triggerSlowOn.join(', ')}`);
+    }
+
+    if (this.config.actionPriorities) {
+      console.log(`   Action Priorities:`);
+      const sorted = [...this.config.actionPriorities].sort((a, b) => a.priority - b.priority);
+      sorted.forEach(ap => {
+        const enabled = ap.enabled !== false ? '✓' : '✗';
+        const limit = ap.maxPerHour ? `(max ${ap.maxPerHour}/hr)` : '';
+        console.log(`     ${enabled} P${ap.priority}: ${ap.action} ${limit}`);
+      });
     }
   }
 
@@ -249,7 +362,7 @@ export class AgentRunner {
   }
 
   /**
-   * Main execution loop
+   * Main execution loop with dynamic interval support
    */
   private async executionLoop(): Promise<void> {
     while (this.isRunning) {
@@ -262,17 +375,34 @@ export class AgentRunner {
 
         // Check working hours
         if (!this.isWithinWorkingHours()) {
+          // Trigger slow mode when outside working hours
+          this.triggerSlowMode('outside_hours');
           await this.sleep(60000); // Check every minute
           continue;
         }
 
         // Execute one cycle
+        const cycleStartTime = Date.now();
         const result = await this.executeOneCycle();
+        const executionTimeMs = Date.now() - cycleStartTime;
+
+        // Add execution time to result
+        result.executionTimeMs = executionTimeMs;
+        result.intervalMode = this.state.currentIntervalMode;
 
         // Update status
         this.status.lastExecution = result;
         this.status.executionCount = ++this.executionCount;
         this.state.executionHistory.push(result);
+
+        // Update action tracker
+        this.updateActionTracker(result.action);
+
+        // Update performance metrics
+        this.updatePerformanceMetrics(result);
+
+        // Determine next interval based on result
+        this.adjustIntervalBasedOnResult(result);
 
         // Call onExecution hook
         if (this.hooks.onExecution || this.config.onExecution) {
@@ -289,8 +419,15 @@ export class AgentRunner {
           await this.dashboard.notifyExecution(result);
         }
 
+        // Get dynamic interval
+        const nextInterval = this.getCurrentInterval();
+        this.status.currentIntervalMs = nextInterval;
+        this.status.nextExecutionAt = Date.now() + nextInterval;
+
+        console.log(`⏱️  Next execution in ${(nextInterval / 1000).toFixed(1)}s (${this.state.currentIntervalMode} mode)`);
+
         // Wait for next interval
-        await this.sleep(this.config.reviewIntervalMs);
+        await this.sleep(nextInterval);
 
       } catch (error: any) {
         console.error(`Agent ${this.config.agentId} execution error:`, error);
@@ -313,6 +450,210 @@ export class AgentRunner {
         this.status.status = 'running';
       }
     }
+  }
+
+  /**
+   * Get current interval based on dynamic interval config and state
+   */
+  private getCurrentInterval(): number {
+    const dynamicConfig = this.config.dynamicInterval;
+    
+    if (!dynamicConfig) {
+      // Use legacy fixed interval
+      return this.config.reviewIntervalMs;
+    }
+
+    // Check if fast mode has expired
+    if (this.state.fastModeExpiresAt && Date.now() > this.state.fastModeExpiresAt) {
+      this.state.currentIntervalMode = 'base';
+      this.state.fastModeExpiresAt = undefined;
+    }
+
+    // Return interval based on current mode
+    switch (this.state.currentIntervalMode) {
+      case 'fast':
+        return dynamicConfig.fastIntervalMs;
+      case 'slow':
+        return dynamicConfig.slowIntervalMs;
+      case 'base':
+      default:
+        return dynamicConfig.baseIntervalMs;
+    }
+  }
+
+  /**
+   * Adjust interval based on execution result
+   */
+  private adjustIntervalBasedOnResult(result: AgentExecutionResult): void {
+    const dynamicConfig = this.config.dynamicInterval;
+    if (!dynamicConfig) return;
+
+    // Check for fast mode triggers
+    if (result.success && ['buy', 'sell'].includes(result.action)) {
+      if (dynamicConfig.triggerFastOn.includes('trade_executed')) {
+        this.triggerFastMode('trade_executed');
+      }
+    }
+
+    if (result.action === 'buy' || result.action === 'sell') {
+      if (dynamicConfig.triggerFastOn.includes('position_change')) {
+        this.triggerFastMode('position_change');
+      }
+    }
+
+    // Check for slow mode triggers
+    if (this.state.positions.length > 0) {
+      if (dynamicConfig.triggerSlowOn.includes('holding_positions')) {
+        // Only switch to slow if not in fast mode
+        if (this.state.currentIntervalMode !== 'fast') {
+          this.triggerSlowMode('holding_positions');
+        }
+      }
+    }
+
+    // Low balance trigger
+    const minBalance = BigInt(this.config.minBalanceUSDC || '500000');
+    const currentBalance = BigInt(this.state.balance || '0');
+    if (currentBalance < minBalance * BigInt(2)) {
+      if (dynamicConfig.triggerSlowOn.includes('low_balance')) {
+        this.triggerSlowMode('low_balance');
+      }
+    }
+  }
+
+  /**
+   * Trigger fast mode
+   */
+  private triggerFastMode(reason: string): void {
+    const dynamicConfig = this.config.dynamicInterval;
+    if (!dynamicConfig) return;
+
+    const duration = dynamicConfig.fastModeDurationMs || 300000; // Default 5 min
+    
+    this.state.currentIntervalMode = 'fast';
+    this.state.fastModeExpiresAt = Date.now() + duration;
+    this.status.currentIntervalMode = 'fast';
+
+    console.log(`🚀 Fast mode activated (${reason}) for ${duration / 1000}s`);
+  }
+
+  /**
+   * Trigger slow mode
+   */
+  private triggerSlowMode(reason: string): void {
+    // Don't override fast mode
+    if (this.state.currentIntervalMode === 'fast') return;
+
+    this.state.currentIntervalMode = 'slow';
+    this.status.currentIntervalMode = 'slow';
+
+    console.log(`🐢 Slow mode activated (${reason})`);
+  }
+
+  /**
+   * Update action tracker for rate limiting
+   */
+  private updateActionTracker(action: string): void {
+    const tracker = this.state.actionTrackers.find(t => t.action === action);
+    if (!tracker) return;
+
+    const now = Date.now();
+    
+    // Reset hourly counter if hour has passed
+    if (now - tracker.hourStartedAt > 3600000) {
+      tracker.executionsThisHour = 0;
+      tracker.hourStartedAt = now;
+    }
+
+    tracker.lastExecutedAt = now;
+    tracker.executionsThisHour++;
+  }
+
+  /**
+   * Check if action is allowed based on cooldown and rate limits
+   */
+  private isActionAllowed(action: string): { allowed: boolean; reason?: string } {
+    const priorities = this.config.actionPriorities;
+    if (!priorities) return { allowed: true };
+
+    const priority = priorities.find(p => p.action === action);
+    if (!priority) return { allowed: true };
+
+    // Check if action is disabled
+    if (priority.enabled === false) {
+      return { allowed: false, reason: 'Action is disabled' };
+    }
+
+    const tracker = this.state.actionTrackers.find(t => t.action === action);
+    if (!tracker) return { allowed: true };
+
+    const now = Date.now();
+
+    // Check cooldown
+    if (priority.cooldownMs) {
+      const timeSinceLast = now - tracker.lastExecutedAt;
+      if (timeSinceLast < priority.cooldownMs) {
+        return {
+          allowed: false,
+          reason: `Cooldown: ${((priority.cooldownMs - timeSinceLast) / 1000).toFixed(0)}s remaining`,
+        };
+      }
+    }
+
+    // Check hourly limit
+    if (priority.maxPerHour !== undefined) {
+      // Reset counter if hour has passed
+      if (now - tracker.hourStartedAt > 3600000) {
+        tracker.executionsThisHour = 0;
+        tracker.hourStartedAt = now;
+      }
+
+      if (tracker.executionsThisHour >= priority.maxPerHour) {
+        return {
+          allowed: false,
+          reason: `Hourly limit reached (${priority.maxPerHour}/hr)`,
+        };
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Update performance metrics after execution
+   */
+  private updatePerformanceMetrics(result: AgentExecutionResult): void {
+    // Calculate P/L if we have before/after balances
+    if (result.balanceBefore && result.balanceAfter) {
+      const before = BigInt(result.balanceBefore);
+      const after = BigInt(result.balanceAfter);
+      const pl = after - before;
+      
+      result.profitLoss = pl.toString();
+      
+      // Update total P/L
+      const totalPL = BigInt(this.state.totalProfitLoss) + pl;
+      this.state.totalProfitLoss = totalPL.toString();
+      this.status.totalProfitLoss = totalPL.toString();
+
+      // Update win/loss count for trades
+      if (['buy', 'sell'].includes(result.action) && result.success) {
+        if (pl > BigInt(0)) {
+          this.state.winCount++;
+        } else if (pl < BigInt(0)) {
+          this.state.lossCount++;
+        }
+
+        // Calculate win rate
+        const totalTrades = this.state.winCount + this.state.lossCount;
+        if (totalTrades > 0) {
+          this.status.winRate = Math.round((this.state.winCount / totalTrades) * 100);
+        }
+      }
+    }
+
+    // Update open positions count
+    this.status.openPositions = this.state.positions.length;
   }
 
   /**
@@ -374,8 +715,24 @@ export class AgentRunner {
       balanceBefore,
       this.state.launchedTokens || []
     );
-    const modelResponse = await this.aiProvider.callModel(prompt, this.config);
+
+    // Track model call time
+    const modelStartTime = Date.now();
+
+    // Use OpenRouter if configured, otherwise use default x402 AI provider
+    let modelResponse: string;
+    if (this.openRouterProvider && (this.config.modelProvider === 'openrouter' || this.config.openRouterConfig)) {
+      modelResponse = await this.openRouterProvider.callModel(prompt, this.config);
+    } else {
+      modelResponse = await this.aiProvider.callModel(prompt, this.config);
+    }
+
+    const modelLatencyMs = Date.now() - modelStartTime;
+    
     const decision = this.aiProvider.parseDecision(modelResponse);
+    
+    // Add model latency to decision for tracking
+    (decision as any).modelLatencyMs = modelLatencyMs;
 
     // Call onDecision hook
     if (this.hooks.onDecision) {
@@ -402,6 +759,7 @@ export class AgentRunner {
       timestamp: startTime,
       balanceBefore,
       balanceAfter,
+      modelLatencyMs,
     };
   }
 
@@ -507,14 +865,18 @@ export class AgentRunner {
             };
           }
 
-          // Track position
-          this.state.positions.push({
+          // Track position with full interface
+          const newPosition: AgentPosition = {
             tokenAddress: decision.params.tokenAddress,
             tokenAmount: buyResult.tokenAmount,
             usdcInvested: buyResult.usdcPaid,
-            entryTime: Date.now(),
             entryPrice: buyResult.averagePricePerToken,
-          });
+            entryTime: Date.now(),
+            currentPrice: buyResult.averagePricePerToken,
+            unrealizedPL: '0',
+            status: 'open',
+          };
+          this.state.positions.push(newPosition);
 
           return { success: true, ...buyResult };
         }
