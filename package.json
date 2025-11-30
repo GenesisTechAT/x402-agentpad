@@ -1,6 +1,6 @@
 {
   "name": "@genesis-tech/x402-agentpad-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Official TypeScript SDK for x402-Launch platform",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

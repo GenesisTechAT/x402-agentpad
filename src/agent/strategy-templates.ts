@@ -310,47 +310,61 @@ CRITICAL: Speed is everything. Analyze fast, decide fast, exit fast.`,
   {
     id: 'token-launcher',
     name: 'Token Launcher',
-    description: 'Launches new tokens and trades them. Creative agent.',
+    description: 'Launch and trade your own tokens. High creativity required.',
     riskLevel: 'high',
-    prompt: `You are a creative token launcher agent.
+    prompt: `You are an autonomous token launcher agent. Your primary goal is to launch new tokens on the x402-Launch platform.
 
-STRATEGY:
-1. LAUNCH a new token with a creative, memorable name
-2. BUY your own token to add liquidity
-3. MONITOR and SELL when profitable
+LAUNCHING STRATEGY:
+- Launch 2-3 tokens per day maximum (quality over quantity)
+- Create meaningful tokens with clear value propositions:
+  * Names: Descriptive and relevant (e.g., "AI Trading Bot Token", "DeFi Yield Optimizer")
+  * Symbols: 3-5 characters, memorable
+  * Descriptions: Clear value proposition
 
-TOKEN CREATION RULES:
-- Create unique, interesting token names
-- Write engaging descriptions
-- Use ticker symbols that are memorable (3-5 chars)
-- Be creative! Think of meme potential, cultural references, or trending topics
+- After launching each token:
+  * IMMEDIATELY buy your configured max position size to bootstrap liquidity
+  * This is critical - you MUST buy your own tokens right after launching!
+  * Hold for at least 1 hour before considering selling
 
-AFTER LAUNCH:
-- Immediately BUY a small amount of your launched token
-- Monitor for other buyers
-- SELL when price increases 20%+ OR if no activity after 30 min
+SELL STRATEGY (IMPORTANT):
+- ALWAYS consider selling when:
+  * Your position is UP +25% or more → TAKE PROFITS
+  * Your position is DOWN -10% or more → CUT LOSSES
+  * Volume is dying (dropped 50%+ from peak)
+  * You need capital for a better opportunity
+- Check your positions regularly and ACT on opportunities to sell!
 
-TOKEN NAME IDEAS:
-- Pop culture references
-- Current events
-- Funny concepts
-- Animal + object combinations
-- Adjective + Noun pairs
+TRADING STRATEGY (for other tokens):
+- Only trade tokens with:
+  * Volume > 3000 USDC
+  * Progress between 10-70%
+  * Good fundamentals
 
-CRITICAL: Only launch ONE token per session. Focus on making it successful.`,
+- Position Management:
+  * Use your configured max position size
+  * Take profits at +25%
+  * Cut losses at -10%`,
     recommendedConfig: {
       executionPreset: 'balanced',
       maxPositionSizeUSDC: '5000000', // 5 USDC
-      maxPositions: 2,
-      reviewIntervalMs: 120000, // 2 minutes
+      maxPositions: 5,
+      reviewIntervalMs: 300000, // 5 minutes
       actionPriorities: [
-        { action: 'launch', priority: 1, maxPerHour: 1 },
-        { action: 'buy', priority: 2, maxPerHour: 5 },
-        { action: 'sell', priority: 1, maxPerHour: 10 },
-        { action: 'analyze', priority: 3, maxPerHour: 20 },
-        { action: 'discover', priority: 4, maxPerHour: 20 },
-        { action: 'wait', priority: 5 },
+        { action: 'launch', priority: 1, maxPerHour: 2, enabled: true, cooldownMs: 1800000 },
+        { action: 'buy', priority: 2, maxPerHour: 10, enabled: true, cooldownMs: 300000 },
+        { action: 'sell', priority: 3, maxPerHour: 8, enabled: true, cooldownMs: 300000 },
+        { action: 'discover', priority: 4, maxPerHour: 12, enabled: true, cooldownMs: 300000 },
+        { action: 'analyze', priority: 5, maxPerHour: 6, enabled: true, cooldownMs: 600000 },
       ],
+      dynamicInterval: {
+        baseIntervalMs: 300000,
+        fastIntervalMs: 60000,
+        slowIntervalMs: 600000,
+        triggerFastOn: ['trade_executed', 'new_token'],
+        triggerSlowOn: ['low_volume', 'holding_positions'],
+        fastModeDurationMs: 600000,
+        actionCooldownMs: 300000,
+      },
     },
     expectedBehavior: {
       tradesPerHour: '3-5',

@@ -58,6 +58,9 @@ export * from './openrouter-provider';
 // Strategy Templates
 export * from './strategy-templates';
 
+// Robust RPC Provider with retry logic
+export * from './rpc-provider';
+
 // Internal modules (not exported - implementation details)
 // - internal-llm.ts: Enhanced LLM with Mastra
 // - internal-tools.ts: Tool definitions

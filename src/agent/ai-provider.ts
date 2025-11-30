@@ -37,13 +37,14 @@ export class X402AIProvider implements IAIModelProvider {
    */
   async callModel(prompt: string, config: AgentConfig): Promise<string> {
     const modelApiUrl = config.modelApiUrl || 'https://api.ai.x402agentpad.io/v1/chat';
-    const modelName = config.modelName || 'gpt-3.5-turbo';
-    const modelProvider = config.modelProvider || 'openai';
+    // Use OpenRouter model format (e.g., "openai/gpt-4o", "anthropic/claude-3-opus")
+    // Default to a cost-effective model if not specified
+    const modelName = config.modelName || 'openai/gpt-4o-mini';
 
-    // Build request payload
+    // Build request payload - no provider field needed, model name includes provider info
+    // All models are routed through OpenRouter
     const requestBody = {
       model: modelName,
-      provider: modelProvider,
       messages: [
         {
           role: 'system',
@@ -140,8 +141,15 @@ export class X402AIProvider implements IAIModelProvider {
 
   /**
    * Build agent prompt with market data and configuration
+   * Uses advanced prompt engineering to ensure AI follows configured behavior
    */
-  buildPrompt(config: AgentConfig, marketData: any, currentBalance: string, launchedTokens: string[] = []): string {
+  buildPrompt(
+    config: AgentConfig, 
+    marketData: any, 
+    currentBalance: string, 
+    launchedTokens: string[] = [],
+    actionCooldowns: { [action: string]: string } = {}
+  ): string {
     const tokensInfo = marketData.tokens?.slice(0, 10).map((t: any) => ({
       address: t.address,
       name: t.name,
@@ -154,78 +162,144 @@ export class X402AIProvider implements IAIModelProvider {
 
     const balanceUSDC = (Number(currentBalance) / 1e6).toFixed(2);
     const maxPositionUSDC = (Number(config.maxPositionSizeUSDC) / 1e6).toFixed(2);
+    const currentPositions = (marketData as any).currentPositions || [];
 
-    return `You are an autonomous trading agent operating on a token launchpad platform.
+    // Check if there are launched tokens that aren't owned (just for info, not forcing behavior)
+    const hasUnownedLaunchedTokens = launchedTokens.some(addr => 
+      !currentPositions.some((p: any) => p.tokenAddress?.toLowerCase() === addr.toLowerCase())
+    );
+    
+    // Build action availability info and decision guidance
+    const actionRules = this.buildActionRules(config, Number(balanceUSDC), currentPositions.length, tokensInfo.length, actionCooldowns, hasUnownedLaunchedTokens);
+    const decisionFramework = this.buildDecisionFramework(config, Number(balanceUSDC), launchedTokens, actionCooldowns, hasUnownedLaunchedTokens);
 
-YOUR TRADING STRATEGY:
+    return `# YOUR STRATEGY (FOLLOW THIS)
 ${config.initialPrompt}
 
-CURRENT SITUATION:
-- Available balance: ${balanceUSDC} USDC
-- Maximum position size: ${maxPositionUSDC} USDC per position
-- Maximum concurrent positions: ${config.maxPositions}
-- Current positions: ${(marketData as any).currentPositions?.length || 0}/${config.maxPositions}
-- Market tokens available: ${tokensInfo.length}
+# CURRENT STATE
+- Balance: ${balanceUSDC} USDC
+- Positions: ${currentPositions.length}/${config.maxPositions}
+- Max position size: ${maxPositionUSDC} USDC
 
-CURRENT MARKET DATA:
-${JSON.stringify(tokensInfo, null, 2)}
+# ACTION AVAILABILITY
+${actionRules}
 
-${launchedTokens.length > 0 ? `RECENTLY LAUNCHED TOKENS (YOU LAUNCHED THESE):
+${currentPositions.length > 0 ? `# YOUR CURRENT POSITIONS (Review for SELL opportunities!)
+${currentPositions.map((p: any, i: number) => {
+      const token = tokensInfo.find((t: any) => t.address?.toLowerCase() === p.tokenAddress?.toLowerCase());
+      const holdMins = Math.floor((p.holdTimeMs || 0) / 60000);
+      const invested = Number(p.usdcInvested) / 1e6;
+      const currentValue = token?.price ? (Number(p.tokenAmount) * Number(token.price)) : invested;
+      const pnl = ((currentValue - invested) / invested * 100).toFixed(1);
+      const pnlSign = parseFloat(pnl) >= 0 ? '+' : '';
+      const sellSignal = parseFloat(pnl) >= 25 ? '🟢 TAKE PROFIT!' : (parseFloat(pnl) <= -10 ? '🔴 CUT LOSS!' : '');
+      return `${i + 1}. ${token?.name || p.tokenAddress.slice(0,8)} - ${invested.toFixed(2)} USDC invested, ${pnlSign}${pnl}% P&L, held ${holdMins}min ${sellSignal}`;
+    }).join('\n')}
+
+SELL REMINDER: If any position shows 🟢 TAKE PROFIT or 🔴 CUT LOSS, consider SELLING!
+` : ''}
+
+${launchedTokens.length > 0 ? `# TOKENS YOU LAUNCHED
 ${launchedTokens.map((addr, i) => {
       const token = tokensInfo.find((t: any) => t.address?.toLowerCase() === addr.toLowerCase());
-      const hasPosition = (marketData as any).currentPositions?.some((p: any) => p.tokenAddress?.toLowerCase() === addr.toLowerCase());
-      return `  ${i + 1}. ${token ? `${token.name} (${token.symbol})` : 'Token'} - ${addr}${hasPosition ? ' [YOU OWN THIS]' : ' [NOT OWNED - BUY IT]'}`;
+      const owned = currentPositions.some((p: any) => p.tokenAddress?.toLowerCase() === addr.toLowerCase());
+      return `${i + 1}. ${token?.name || 'Token'} (${addr.slice(0,8)}...) - ${owned ? '✅ You own this' : '⚠️ You do NOT own this - BUY IT!'}`;
     }).join('\n')}
 
-IMPORTANT: 
-- If you launched a token but DON'T own it yet, buy it now (once only)
-- If you already own a launched token, focus on selling it when profitable (don't buy more)
-- Don't buy the same token twice - check your current positions first
+IMPORTANT: If you just launched a token but don't own it yet, your NEXT action should be BUY!
+Even if launch is on cooldown, BUY is still available.
 ` : ''}
 
-${(marketData as any).currentPositions?.length > 0 ? `CURRENT POSITIONS (YOU OWN THESE - CONSIDER SELLING):
-${(marketData as any).currentPositions.map((p: any, i: number) => {
-      const token = tokensInfo.find((t: any) => t.address?.toLowerCase() === p.tokenAddress?.toLowerCase());
-      const holdMinutes = Math.floor(p.holdTimeMs / 60000);
-      return `  ${i + 1}. ${token ? `${token.name} (${token.symbol})` : p.tokenAddress} - Invested: ${(Number(p.usdcInvested) / 1e6).toFixed(2)} USDC, Held: ${holdMinutes}m`;
-    }).join('\n')}
+# MARKET DATA
+${tokensInfo.length > 0 ? JSON.stringify(tokensInfo.slice(0, 5), null, 2) : 'No tokens available'}
 
-PRIORITY: Review your positions and sell when profitable. Don't buy more tokens if you're at max positions.
-` : ''}
+# DECISION GUIDANCE
+${decisionFramework}
 
-AVAILABLE ACTIONS:
-1. discover - Discover more tokens (params: {limit?: number, sortBy?: 'volume24h'|'marketCap'|'launchTime'})
-2. analyze - Get detailed info about a token (params: {tokenAddress: string})
-3. buy - Buy tokens (params: {tokenAddress: string, usdcAmount: string})
-   Use decimal format: "0.5" for 0.5 USDC, "5.0" for 5 USDC, "10.25" for 10.25 USDC
-4. sell - Sell tokens (params: {tokenAddress: string, tokenAmount: string})
-   Use decimal format: "0.5" for 0.5 tokens, "1.0" for 1 token, "10.25" for 10.25 tokens
-5. launch - Launch a new token (params: {name: string, ticker: string, description: string})
-6. wait - Wait before next action (params: {reason: string})
+# AVAILABLE ACTIONS
+- launch: Create token {name, ticker, description} - costs ~0.01 USDC
+- buy: Buy tokens {tokenAddress, usdcAmount} - use decimal format "5.0"
+- sell: Sell tokens {tokenAddress, tokenAmount} - use decimal format "1.0"
+- discover: Find tokens {limit?, sortBy?}
+- analyze: Get token details {tokenAddress}
+- wait: Skip this cycle {reason} - only if truly nothing to do
 
-CONSTRAINTS:
-- Maximum position size: ${maxPositionUSDC} USDC
-- Maximum concurrent positions: ${config.maxPositions}
-- Current balance: ${balanceUSDC} USDC
-- CRITICAL: You CANNOT buy more than your current balance (${balanceUSDC} USDC)
-- CRITICAL: Use decimal format for amounts, e.g., "0.5", "5.0", "10.25"
+# RESPONSE (JSON ONLY)
+{"action":"...","params":{...},"reasoning":"explain your decision based on your strategy","confidence":0.85}`;
+  }
 
-CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON.
+  /**
+   * Build agent identity based on configuration
+   */
+  /**
+   * Build action availability info (strategy-agnostic)
+   */
+  private buildActionRules(
+    config: AgentConfig, 
+    balance: number, 
+    positions: number, 
+    tokens: number,
+    actionCooldowns: { [action: string]: string } = {},
+    hasUnownedLaunchedTokens: boolean = false
+  ): string {
+    const priorities = config.actionPriorities || [];
+    const enabledPriorities = priorities.filter(p => p.enabled !== false).sort((a, b) => a.priority - b.priority);
+    const disabledActions = priorities.filter(p => p.enabled === false).map(p => p.action);
+    
+    let rules = '';
+    
+    // Show what's available vs blocked
+    rules += `Available actions:\n`;
+    
+    const allActions: Array<'launch' | 'buy' | 'sell' | 'discover' | 'analyze' | 'wait'> = ['launch', 'buy', 'sell', 'discover', 'analyze', 'wait'];
+    allActions.forEach(action => {
+      if (disabledActions.includes(action)) {
+        rules += `  ✗ ${action}: DISABLED in config\n`;
+      } else if (actionCooldowns[action]) {
+        rules += `  ⏰ ${action}: ${actionCooldowns[action]}\n`;
+      } else {
+        rules += `  ✓ ${action}: available\n`;
+      }
+    });
+    
+    // Show priority order if configured
+    if (enabledPriorities.length > 0) {
+      rules += `\nYour configured priorities: `;
+      rules += enabledPriorities.map(p => `${p.action}(P${p.priority})`).join(' → ');
+      rules += '\n';
+    }
+    
+    return rules;
+  }
 
-Respond with ONLY a JSON object (no markdown formatting, no code blocks):
-{
-  "action": "buy|sell|launch|discover|analyze|wait",
-  "params": { ... },
-  "reasoning": "Clear explanation of why you chose this action",
-  "confidence": 0.85
-}
-
-Example valid buy response (usdcAmount in decimal format):
-{"action":"buy","params":{"tokenAddress":"0x...","usdcAmount":"5.0"},"reasoning":"Token shows strong volume","confidence":0.85}
-Note: Use decimal format: "0.5", "5.0", "10.25"
-
-Example valid launch response:
-{"action":"launch","params":{"name":"My Token","ticker":"MTK","description":"A great token for trading"},"reasoning":"Launching new token","confidence":0.9}`;
+  /**
+   * Build decision guidance (strategy-agnostic)
+   */
+  private buildDecisionFramework(
+    config: AgentConfig, 
+    balance: number, 
+    launchedTokens: string[],
+    actionCooldowns: { [action: string]: string } = {},
+    hasUnownedLaunchedTokens: boolean = false
+  ): string {
+    let framework = '';
+    
+    // Simple guidance based on what's blocked
+    const blockedActions = Object.keys(actionCooldowns);
+    
+    if (blockedActions.length > 0) {
+      framework += `Some actions are on cooldown. Choose from available actions based on your strategy.\n`;
+    }
+    
+    // Gentle hint about launched tokens (not mandatory - let strategy decide)
+    if (hasUnownedLaunchedTokens) {
+      framework += `\nNote: You have launched tokens you don't own yet. Consider if your strategy requires buying them.\n`;
+    }
+    
+    framework += `\nFollow YOUR STRATEGY above to decide what to do next.`;
+    framework += `\nOnly use "wait" if your strategy says to wait or if no suitable action is available.`;
+    
+    return framework;
   }
 
   /**

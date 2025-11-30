@@ -31,6 +31,7 @@ import {
 import { X402AIProvider } from './ai-provider';
 import { OpenRouterProvider, createOpenRouterConfig } from './openrouter-provider';
 import { DashboardClient } from './dashboard-client';
+import { RobustProvider } from './rpc-provider';
 
 export class AgentRunner {
   private client: X402LaunchClient;
@@ -51,6 +52,7 @@ export class AgentRunner {
   private rpcUrl: string;
   private wallet: ethers.Wallet;
   private ethersProvider: ethers.Provider;
+  private robustProvider: RobustProvider;
 
   // USDC address by chain
   private static USDC_ADDRESSES: Record<number, string> = {
@@ -84,9 +86,15 @@ export class AgentRunner {
       rpcUrl: this.rpcUrl,
     });
 
-    // Initialize wallet and provider
+    // Initialize wallet and robust provider with retry logic
     this.wallet = new ethers.Wallet(privateKey);
-    this.ethersProvider = new ethers.JsonRpcProvider(this.rpcUrl, this.chainId);
+    // Create robust provider with multiple RPC fallbacks
+    this.robustProvider = new RobustProvider(this.rpcUrl, this.chainId, {
+      maxRetries: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 10000,
+    });
+    this.ethersProvider = this.robustProvider.getProvider();
     const usdcAddress = AgentRunner.USDC_ADDRESSES[this.chainId] || AgentRunner.USDC_ADDRESSES[84532];
 
     // Initialize default AI provider (x402)
@@ -435,6 +443,32 @@ export class AgentRunner {
         this.status.lastError = error;
         this.status.status = 'error';
 
+        // CREATE ERROR EXECUTION RECORD so it shows in frontend
+        const errorResult = {
+          success: false,
+          action: 'wait' as const, // Use 'wait' as the action type for errors
+          decision: {
+            action: 'wait' as const,
+            params: { reason: `ERROR: ${error.message}` },
+            reasoning: `Execution failed: ${error.message}`,
+            confidence: 0,
+          },
+          error: error.message,
+          timestamp: Date.now(),
+          balanceBefore: this.state.balance || '0',
+          balanceAfter: this.state.balance || '0',
+        };
+
+        // Call onExecution with error result so it appears in logs
+        if (this.hooks.onExecution || this.config.onExecution) {
+          try {
+            await this.hooks.onExecution?.(errorResult);
+            await this.config.onExecution?.(errorResult);
+          } catch (hookError: any) {
+            console.error(`Agent ${this.config.agentId} error execution logging failed:`, hookError);
+          }
+        }
+
         // Call onError hook
         if (this.hooks.onError || this.config.onError) {
           try {
@@ -487,6 +521,12 @@ export class AgentRunner {
   private adjustIntervalBasedOnResult(result: AgentExecutionResult): void {
     const dynamicConfig = this.config.dynamicInterval;
     if (!dynamicConfig) return;
+
+    // LAUNCH triggers fast mode - agent should buy immediately after launching
+    if (result.success && result.action === 'launch') {
+      console.log(`🚀 Launch successful - triggering FAST mode for immediate follow-up action`);
+      this.triggerFastMode('token_launched');
+    }
 
     // Check for fast mode triggers
     if (result.success && ['buy', 'sell'].includes(result.action)) {
@@ -708,12 +748,23 @@ export class AgentRunner {
       })),
     };
 
-    // Build prompt and get AI decision (include launched tokens in context)
+    // Check which actions are on cooldown
+    const actionCooldowns: { [action: string]: string } = {};
+    const actions = ['launch', 'buy', 'sell', 'discover', 'analyze'];
+    for (const action of actions) {
+      const check = this.isActionAllowed(action);
+      if (!check.allowed) {
+        actionCooldowns[action] = check.reason || 'On cooldown';
+      }
+    }
+
+    // Build prompt and get AI decision (include launched tokens and cooldowns)
     const prompt = this.aiProvider.buildPrompt(
       this.config,
       marketDataWithPositions,
       balanceBefore,
-      this.state.launchedTokens || []
+      this.state.launchedTokens || [],
+      actionCooldowns
     );
 
     // Track model call time
@@ -816,10 +867,20 @@ export class AgentRunner {
 
           // Convert to atomic units (6 decimals)
           usdcAmountStr = Math.floor(decimalAmount * 1e6).toString();
-          console.log(`[AgentRunner] Buying with ${decision.params.usdcAmount} USDC (${usdcAmountStr} atomic units)`);
+          
+          // ENFORCE max position size from config (cap the buy amount)
+          const maxPositionSize = BigInt(this.config.maxPositionSizeUSDC);
+          let buyAmount = BigInt(usdcAmountStr);
+          
+          if (buyAmount > maxPositionSize) {
+            console.log(`[AgentRunner] ⚠️ AI requested ${Number(buyAmount)/1e6} USDC but max is ${Number(maxPositionSize)/1e6} USDC - capping`);
+            buyAmount = maxPositionSize;
+            usdcAmountStr = maxPositionSize.toString();
+          }
+          
+          console.log(`[AgentRunner] Buying with ${Number(buyAmount)/1e6} USDC (${usdcAmountStr} atomic units)`);
 
           // Validate buy amount doesn't exceed balance
-          const buyAmount = BigInt(usdcAmountStr);
           const balance = BigInt(this.state.balance);
           if (buyAmount > balance) {
             return {
@@ -951,12 +1012,14 @@ export class AgentRunner {
         }
 
         case 'launch': {
-          if (!decision.params?.name || !decision.params?.ticker || !decision.params?.description) {
-            return { success: false, error: 'Missing launch parameters' };
+          // Accept both 'ticker' and 'symbol' (AI sometimes uses 'symbol')
+          const ticker = decision.params?.ticker || decision.params?.symbol;
+          if (!decision.params?.name || !ticker || !decision.params?.description) {
+            return { success: false, error: `Missing launch parameters. Got: name=${decision.params?.name}, ticker=${ticker}, description=${decision.params?.description?.substring(0, 20)}` };
           }
           const launchResult = await this.client.launchToken({
             name: decision.params.name,
-            ticker: decision.params.ticker.toUpperCase(),
+            ticker: ticker.toUpperCase(),
             description: decision.params.description,
             image: decision.params.image || `https://via.placeholder.com/400/000000/FFFFFF?text=${encodeURIComponent(decision.params.ticker)}`,
             initialSupply: decision.params.initialSupply,
@@ -993,21 +1056,23 @@ export class AgentRunner {
   }
 
   /**
-   * Get agent wallet balance (on-chain)
+   * Get agent wallet balance (on-chain) with retry logic
    */
   private async getBalance(): Promise<string> {
     try {
       const walletAddress = this.client.getWalletAddress();
       const usdcAddress = AgentRunner.USDC_ADDRESSES[this.chainId] || AgentRunner.USDC_ADDRESSES[84532];
 
-      // Query USDC balance from blockchain
-      const provider = new ethers.JsonRpcProvider(this.rpcUrl, this.chainId);
+      // Query USDC balance using robust provider with retry
       const usdcABI = [
         'function balanceOf(address account) view returns (uint256)',
         'function decimals() view returns (uint8)',
       ];
-      const usdcContract = new ethers.Contract(usdcAddress, usdcABI, provider);
-      const balance = await usdcContract.balanceOf(walletAddress);
+      
+      const balance = await this.robustProvider.call(async (provider) => {
+        const usdcContract = new ethers.Contract(usdcAddress, usdcABI, provider);
+        return await usdcContract.balanceOf(walletAddress);
+      }, 'getBalance');
 
       // Update state with actual balance
       const balanceString = balance.toString();
@@ -1016,7 +1081,7 @@ export class AgentRunner {
 
       return balanceString;
     } catch (error: any) {
-      console.warn(`Failed to get balance: ${error.message}`);
+      console.warn(`Failed to get balance after retries: ${error.message}`);
       return this.state.balance || '0';
     }
   }
@@ -1027,6 +1092,84 @@ export class AgentRunner {
   setBalance(balance: string): void {
     this.state.balance = balance;
     this.status.balance = balance;
+  }
+
+  /**
+   * Sell all positions (manual cleanup)
+   * Returns array of sell results for each position
+   */
+  async sellAllPositions(): Promise<Array<{ tokenAddress: string; success: boolean; txHash?: string; error?: string }>> {
+    const results: Array<{ tokenAddress: string; success: boolean; txHash?: string; error?: string }> = [];
+    
+    // Make a copy since we'll be modifying the array
+    const positions = [...this.state.positions];
+    
+    console.log(`[AgentRunner] Selling all ${positions.length} positions...`);
+    
+    for (const position of positions) {
+      try {
+        const tokenAddress = position.tokenAddress;
+        const tokenAmount = position.tokenAmount;
+        
+        console.log(`[AgentRunner] Selling ${tokenAmount} of ${tokenAddress.slice(0, 10)}...`);
+        
+        // Execute sell based on execution mode
+        const executionMode = this.client.getExecutionMode();
+        let sellResult: any;
+
+        if (executionMode === 'gasless') {
+          sellResult = await this.client.sellTokens({
+            tokenAddress,
+            tokenAmount,
+          });
+        } else {
+          const signedData = await this.client.sellTokensSelfExecute({
+            tokenAddress,
+            tokenAmount,
+          });
+          const txHash = await this.client.executeSellTransaction(signedData);
+          sellResult = { transactionHash: txHash };
+        }
+
+        // Remove from positions
+        const positionIndex = this.state.positions.findIndex(
+          (p: any) => p.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase()
+        );
+        if (positionIndex !== -1) {
+          this.state.positions.splice(positionIndex, 1);
+        }
+
+        results.push({
+          tokenAddress,
+          success: true,
+          txHash: sellResult.transactionHash,
+        });
+        
+        console.log(`[AgentRunner] ✅ Sold ${tokenAddress.slice(0, 10)} - TX: ${sellResult.transactionHash}`);
+        
+      } catch (error: any) {
+        console.error(`[AgentRunner] ❌ Failed to sell ${position.tokenAddress}:`, error.message);
+        results.push({
+          tokenAddress: position.tokenAddress,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+    
+    // Update open positions count
+    this.status.openPositions = this.state.positions.length;
+    
+    console.log(`[AgentRunner] Sell all complete. ${results.filter(r => r.success).length}/${positions.length} sold successfully.`);
+    
+    return results;
+  }
+
+  /**
+   * Get current positions
+   */
+  getPositions(): any[] {
+    return this.state.positions;
   }
 
   /**

@@ -1,4 +1,4 @@
-# @x402-launch/sdk
+# @genesis-tech/x402-agentpad-sdk
 
 Official TypeScript SDK for building AI-powered trading agents on x402 AgentPad.
 
@@ -13,6 +13,10 @@ Official TypeScript SDK for building AI-powered trading agents on x402 AgentPad.
 - 🔄 **Complete Trading API** - Launch, buy, sell tokens programmatically
 - ⚡ **Dual Execution Modes** - Gasless (no ETH needed) or Self-Execute (lower fees)
 - 📊 **Real-time Monitoring** - Lifecycle hooks for tracking agent decisions and performance
+- 🎯 **Strategy Templates** - Pre-built strategies (Conservative, Momentum, Token Launcher, etc.)
+- 🔀 **Multi-Model Support** - OpenAI, Anthropic, and OpenRouter (100+ models)
+- ⏱️ **Dynamic Intervals** - Auto-adjust execution speed based on market conditions
+- 🎛️ **Action Priorities** - Fine-tune which actions your agent prioritizes
 
 ## Installation
 
@@ -64,6 +68,28 @@ pnpm run example:self-execute
 pnpm run example:battle
 ```
 
+## Strategy Templates
+
+Use pre-built strategies or create your own:
+
+```typescript
+import { AgentRunner, getStrategyTemplate, STRATEGY_TEMPLATES } from '@genesis-tech/x402-agentpad-sdk';
+
+// Use a pre-built strategy
+const template = getStrategyTemplate('token-launcher');
+const config = {
+  agentId: 'my-launcher',
+  ...template,  // Includes prompt, priorities, intervals
+};
+
+// Available templates:
+// - 'conservative' - Long-term holding, capital preservation
+// - 'momentum' - Follow trends, quick exits
+// - 'dip-buyer' - Buy oversold tokens
+// - 'launch-hunter' - Snipe new tokens early
+// - 'token-launcher' - Launch and trade your own tokens
+```
+
 ## Agent Configuration
 
 ```typescript
@@ -74,12 +100,21 @@ interface AgentConfig {
   maxPositions: number;               // Max concurrent positions
   reviewIntervalMs: number;           // How often to review (milliseconds)
   
-  // Optional
-  modelProvider?: string;             // Default: 'openai'
-  modelName?: string;                 // Default: 'gpt-4'
+  // AI Model (Optional)
+  modelProvider?: 'openai' | 'anthropic' | 'openrouter';
+  modelName?: string;                 // e.g., 'gpt-4o', 'claude-3-opus', etc.
+  openRouterConfig?: OpenRouterConfig; // For multi-model strategies
+  
+  // Risk Management (Optional)
   minBalanceUSDC?: string;            // Min balance to continue
   workingHoursStart?: number;         // 0-23 (default: 24/7)
   workingHoursEnd?: number;           // 0-23 (default: 24/7)
+  
+  // Advanced: Action Priorities
+  actionPriorities?: ActionPriority[];  // Fine-tune action behavior
+  
+  // Advanced: Dynamic Intervals
+  dynamicInterval?: DynamicIntervalConfig;  // Auto-adjust speed
   
   // Lifecycle hooks for monitoring
   onStart?: () => Promise<void>;
@@ -90,6 +125,65 @@ interface AgentConfig {
   // Execution mode
   executionMode?: 'auto' | 'gasless' | 'self-execute';  // Default: 'auto'
 }
+```
+
+## Multi-Model Support
+
+Use different AI models via OpenRouter:
+
+```typescript
+import { AgentRunner, createOpenRouterConfig } from '@genesis-tech/x402-agentpad-sdk';
+
+const config = {
+  agentId: 'multi-model-trader',
+  initialPrompt: 'Trade using advanced reasoning',
+  modelProvider: 'openrouter',
+  openRouterConfig: createOpenRouterConfig('balanced'), // or 'aggressive', 'conservative'
+  // ... other config
+};
+
+// Or specify exact models:
+const config = {
+  modelProvider: 'openrouter',
+  openRouterConfig: {
+    apiKey: process.env.OPENROUTER_API_KEY,
+    primaryModel: 'anthropic/claude-3.5-sonnet',
+    fallbackModel: 'openai/gpt-4o-mini',
+  },
+};
+```
+
+## Action Priorities
+
+Control which actions your agent prioritizes:
+
+```typescript
+const config = {
+  actionPriorities: [
+    { action: 'launch', enabled: true, priority: 1, cooldownMs: 300000, maxPerHour: 2 },
+    { action: 'buy', enabled: true, priority: 2, cooldownMs: 60000, maxPerHour: 10 },
+    { action: 'sell', enabled: true, priority: 2, cooldownMs: 30000, maxPerHour: 20 },
+    { action: 'discover', enabled: true, priority: 3, cooldownMs: 120000, maxPerHour: 5 },
+    { action: 'analyze', enabled: true, priority: 4, cooldownMs: 60000, maxPerHour: 10 },
+  ],
+};
+```
+
+## Dynamic Intervals
+
+Auto-adjust execution speed based on conditions:
+
+```typescript
+const config = {
+  dynamicInterval: {
+    baseIntervalMs: 120000,        // Normal: 2 minutes
+    fastIntervalMs: 30000,         // Fast: 30 seconds
+    slowIntervalMs: 300000,        // Slow: 5 minutes
+    triggerFastOn: ['high_volatility', 'token_launched', 'trade_executed'],
+    triggerSlowOn: ['low_balance', 'outside_hours', 'max_positions_reached'],
+    fastModeDurationMs: 180000,    // Stay fast for 3 minutes
+  },
+};
 ```
 
 ## Execution Modes
