@@ -20,25 +20,31 @@ new AgentRunner(config: AgentConfig, privateKey: string, clientConfig?: ClientCo
 ```typescript
 interface AgentConfig {
   agentId: string;                    // Unique agent ID
+  name?: string;                      // Agent display name
   initialPrompt: string;              // Trading strategy (natural language)
   maxPositionSizeUSDC: string;        // Max USDC per trade (e.g., "5000000" = 5 USDC)
   maxPositions: number;               // Max concurrent positions
   reviewIntervalMs: number;           // Review frequency in ms
   
-  // Optional
-  name?: string;                      // Agent name
-  modelProvider?: string;             // Default: 'openai'
-  modelName?: string;                 // Default: 'gpt-4'
+  // AI Model (Optional - uses x402 AI service by default)
+  modelProvider?: 'x402';             // Uses x402 AI service (recommended)
+  modelName?: string;                 // e.g., 'openai/gpt-4o-mini', 'anthropic/claude-3.5-sonnet'
   modelApiUrl?: string;               // Custom AI API URL
+  
+  // Risk Management (Optional)
   minBalanceUSDC?: string;            // Min balance to continue
   workingHoursStart?: number;         // 0-23 (default: 0)
   workingHoursEnd?: number;           // 0-23 (default: 23)
+  
+  // Execution mode
+  executionMode?: 'auto' | 'gasless' | 'self-execute';  // Default: 'auto'
   
   // Lifecycle hooks
   onStart?: () => Promise<void>;
   onStop?: () => Promise<void>;
   onError?: (error: Error) => Promise<void>;
   onExecution?: (result: AgentExecutionResult) => Promise<void>;
+  onPhaseChange?: (phase: ExecutionPhase, details?: string) => Promise<void>;
 }
 ```
 
@@ -82,7 +88,7 @@ Get current agent status.
 
 ```typescript
 const status = runner.getStatus();
-// { agentId, status: 'running' | 'stopped' | 'paused', ... }
+// { agentId, status, currentPhase, phaseDetails, ... }
 ```
 
 #### `getState()`
@@ -94,10 +100,27 @@ const state = runner.getState();
 // { balance, positions, executionHistory, ... }
 ```
 
+#### `getCurrentPhase()`
+
+Get current execution phase.
+
+```typescript
+const phase = runner.getCurrentPhase();
+// 'fetching_market' | 'calling_ai' | 'executing_action' | 'waiting' | etc.
+```
+
+#### `setInitialExecutionHistory(history)`
+
+Load execution history from database (for agent memory after restart).
+
+```typescript
+runner.setInitialExecutionHistory(recentExecutions);
+```
+
 ### Example
 
 ```typescript
-import { AgentRunner } from '@x402-launch/sdk';
+import { AgentRunner } from '@genesis-tech/x402-agentpad-sdk';
 
 const runner = new AgentRunner({
   agentId: 'trader-001',
@@ -105,8 +128,12 @@ const runner = new AgentRunner({
   maxPositionSizeUSDC: '5000000',
   maxPositions: 3,
   reviewIntervalMs: 300000,
+  modelName: 'openai/gpt-4o-mini',
   onExecution: async (result) => {
     console.log(`Action: ${result.action}, Success: ${result.success}`);
+  },
+  onPhaseChange: async (phase, details) => {
+    console.log(`Phase: ${phase} - ${details}`);
   },
 }, process.env.AGENT_PRIVATE_KEY!);
 
@@ -130,6 +157,7 @@ new X402LaunchClient(config: ClientConfig)
 - `config.baseUrl` - API URL (optional)
 - `config.chainId` - Chain ID (optional, default: 84532)
 - `config.rpcUrl` - RPC URL (optional)
+- `config.executionMode` - 'auto' | 'gasless' | 'self-execute' (optional)
 
 ### Methods
 
@@ -209,13 +237,24 @@ const address = client.getWalletAddress();
 
 **Returns:** `string`
 
+#### `getBalance()`
+
+Get USDC balance.
+
+```typescript
+const balance = await client.getBalance();
+```
+
+**Returns:** `string` (USDC balance in 6 decimals)
+
 ### Example
 
 ```typescript
-import { X402LaunchClient } from '@x402-launch/sdk';
+import { X402LaunchClient } from '@genesis-tech/x402-agentpad-sdk';
 
 const client = new X402LaunchClient({
   wallet: { privateKey: process.env.AGENT_PRIVATE_KEY! },
+  executionMode: 'auto',
 });
 
 // Discover tokens
@@ -232,7 +271,49 @@ if (tokens.length > 0) {
 
 ---
 
+## Strategy Templates
+
+Use pre-built trading strategies:
+
+```typescript
+import { getStrategyTemplate, STRATEGY_TEMPLATE_LIST } from '@genesis-tech/x402-agentpad-sdk';
+
+// Get a template
+const template = getStrategyTemplate('token-launcher');
+
+// Use in config
+const config = {
+  agentId: 'my-agent',
+  ...template,
+};
+
+// List all templates
+console.log(STRATEGY_TEMPLATE_LIST);
+// ['conservative-holder', 'momentum-trader', 'dip-buyer', 'new-launch-hunter', 'token-launcher', ...]
+```
+
+---
+
 ## Types
+
+### ExecutionPhase
+
+```typescript
+type ExecutionPhase = 
+  | 'idle'              // Waiting for next cycle
+  | 'queued'            // Job in queue
+  | 'starting'          // Agent starting
+  | 'fetching_market'   // Getting market data
+  | 'building_prompt'   // Building AI prompt
+  | 'calling_ai'        // Waiting for AI response
+  | 'parsing_decision'  // Parsing AI decision
+  | 'executing_action'  // Executing trade
+  | 'recording_result'  // Saving result
+  | 'waiting'           // Waiting for next interval
+  | 'error'             // Error occurred
+  | 'paused'            // Agent paused
+  | 'stopped';          // Agent stopped
+```
 
 ### TokenInfo
 
@@ -265,6 +346,8 @@ interface AgentExecutionResult {
   timestamp: number;
   balanceBefore?: string;
   balanceAfter?: string;
+  modelLatencyMs?: number;
+  executionTimeMs?: number;
 }
 ```
 
@@ -281,6 +364,10 @@ interface AgentStatus {
   lastError?: Error;
   startedAt?: number;
   stoppedAt?: number;
+  // Real-time phase tracking
+  currentPhase?: ExecutionPhase;
+  phaseDetails?: string;
+  phaseChangedAt?: number;
 }
 ```
 

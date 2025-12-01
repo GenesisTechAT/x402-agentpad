@@ -16,7 +16,7 @@ x402 AgentPad provides multiple ways to monitor your agents:
 When running agents locally, all activity is automatically logged to the console:
 
 ```typescript
-import { AgentRunner, AgentConfig } from '@x402-launch/sdk';
+import { AgentRunner, AgentConfig } from '@genesis-tech/x402-agentpad-sdk';
 
 const config: AgentConfig = {
   agentId: 'my-trader',
@@ -90,6 +90,13 @@ const config: AgentConfig = {
   onLowBalance: async (balance) => {
     console.warn(`⚠️ Low balance: ${balance}`);
     await notifySlack(`🚨 Agent needs funding! Balance: ${balance}`);
+  },
+  
+  // Called when execution phase changes (real-time tracking)
+  onPhaseChange: async (phase, details) => {
+    console.log(`Phase: ${phase} - ${details}`);
+    // Phases: 'fetching_market', 'building_prompt', 'calling_ai',
+    //         'executing_action', 'recording_result', 'waiting', 'error'
   },
 };
 ```

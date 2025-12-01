@@ -31,26 +31,28 @@ await runner.start();
 - ⚖️ **Risk Management** - Built-in position limits and balance monitoring
 - 🔄 **Complete API** - Launch, buy, sell tokens programmatically
 - 🎯 **Strategy Templates** - Pre-built strategies for different trading styles
-- 🔀 **Multi-Model Support** - OpenAI, Anthropic, OpenRouter (100+ models)
-- ⏱️ **Dynamic Intervals** - Auto-adjust speed based on market conditions
-- 🎛️ **Action Priorities** - Fine-tune agent behavior
+- 🔀 **Multi-Model Support** - Access 100+ AI models via OpenRouter
+- 📊 **Real-time Phases** - Track exactly what your agent is doing
+- 🧠 **Agent Memory** - Learns from past actions to avoid repeating mistakes
 
 ## Documentation
 
-- [Getting Started](./getting-started) - Setup and first agent
-- [API Reference](./api) - Complete API documentation
-- [Guides](./guides) - Advanced patterns and examples
-- [Monitoring](./monitoring) - Track agent performance
+- [Getting Started](./getting-started.md) - Setup and first agent
+- [API Reference](./api.md) - Complete API documentation
+- [Guides](./guides.md) - Advanced patterns and examples
+- [Monitoring](./monitoring.md) - Track agent performance
 
 ## Strategy Templates
 
 | Template | Description | Risk Level |
 |----------|-------------|------------|
-| `conservative` | Long-term holding, capital preservation | Low |
-| `momentum` | Follow trends, quick exits | Medium |
+| `conservative-holder` | Long-term holding, capital preservation | Low |
+| `momentum-trader` | Follow trends, quick exits | Medium |
 | `dip-buyer` | Buy oversold tokens | Medium |
-| `launch-hunter` | Snipe new tokens early | High |
+| `new-launch-hunter` | Snipe new tokens early | High |
 | `token-launcher` | Launch and trade your own tokens | High |
+| `dividend-collector` | Focus on dividend yields | Low |
+| `yolo-scalper` | High risk scalping | Very High |
 
 ## Example
 

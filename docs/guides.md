@@ -3,7 +3,7 @@
 ## Building Your First Agent
 
 ```typescript
-import { AgentRunner } from '@x402-launch/sdk';
+import { AgentRunner } from '@genesis-tech/x402-agentpad-sdk';
 
 const runner = new AgentRunner({
   agentId: 'trader-001',
@@ -41,6 +41,42 @@ RISK:
 `;
 ```
 
+## Using Strategy Templates
+
+Pre-built strategies are available:
+
+```typescript
+import { AgentRunner, getStrategyTemplate, STRATEGY_TEMPLATE_LIST } from '@genesis-tech/x402-agentpad-sdk';
+
+// List available templates
+console.log(STRATEGY_TEMPLATE_LIST);
+// ['conservative-holder', 'momentum-trader', 'dip-buyer', 'new-launch-hunter', 'token-launcher', ...]
+
+// Use a template
+const template = getStrategyTemplate('momentum-trader');
+const runner = new AgentRunner({
+  agentId: 'momentum-bot',
+  ...template,
+}, process.env.AGENT_PRIVATE_KEY!);
+```
+
+## Real-time Phase Tracking
+
+Monitor exactly what your agent is doing:
+
+```typescript
+const runner = new AgentRunner({
+  // ... config ...
+  onPhaseChange: async (phase, details) => {
+    console.log(`Phase: ${phase}`);
+    console.log(`Details: ${details}`);
+    
+    // Phases: 'fetching_market', 'building_prompt', 'calling_ai', 
+    //         'executing_action', 'recording_result', 'waiting'
+  },
+}, privateKey);
+```
+
 ## Monitoring Your Agent
 
 Use lifecycle hooks to monitor execution:
@@ -51,46 +87,52 @@ const runner = new AgentRunner({
   onExecution: async (result) => {
     console.log(`Action: ${result.action}`);
     console.log(`Success: ${result.success}`);
+    console.log(`AI Latency: ${result.modelLatencyMs}ms`);
     
     // Log to database
     await db.logExecution(result);
     
-    // Update dashboard
-    await updateDashboard(result);
+    // Send alerts for failures
+    if (!result.success) {
+      await sendAlert(`Agent action failed: ${result.error}`);
+    }
   },
   onError: async (error) => {
     console.error('Agent error:', error);
-    await sendAlert(error);
+    await sendAlert(error.message);
   },
 }, privateKey);
 ```
 
-## Testing Strategies
+## Agent Memory
 
-Test different strategies locally:
+Agents learn from past failures. Load execution history on restart:
 
 ```typescript
-const strategies = [
-  { name: 'Conservative', prompt: '...' },
-  { name: 'Aggressive', prompt: '...' },
-];
+const runner = new AgentRunner(config, privateKey);
 
-for (const strategy of strategies) {
-  const runner = new AgentRunner({
-    agentId: `test-${strategy.name}`,
-    initialPrompt: strategy.prompt,
-    maxPositionSizeUSDC: '1000000',  // 1 USDC for testing
-    maxPositions: 2,
-    reviewIntervalMs: 60000,  // 1 minute
-  }, testPrivateKey);
+// Load recent executions from your database
+const recentExecutions = await db.getRecentExecutions(agentId, 10);
+runner.setInitialExecutionHistory(recentExecutions);
+
+await runner.start();
+```
+
+## Choosing AI Models
+
+Select the right model for your strategy:
+
+```typescript
+const config = {
+  // Fast and cheap - good for simple strategies
+  modelName: 'openai/gpt-4o-mini',
   
-  await runner.start();
-  await sleep(3600000);  // Run for 1 hour
-  await runner.stop();
+  // Smarter but slower - good for complex analysis
+  // modelName: 'anthropic/claude-3.5-sonnet',
   
-  const state = runner.getState();
-  console.log(`${strategy.name}: ${state.positions.length} positions`);
-}
+  // Budget option
+  // modelName: 'meta-llama/llama-3.1-70b-instruct',
+};
 ```
 
 ## Manual Trading
@@ -98,10 +140,11 @@ for (const strategy of strategies) {
 Use `X402LaunchClient` for manual control:
 
 ```typescript
-import { X402LaunchClient } from '@x402-launch/sdk';
+import { X402LaunchClient } from '@genesis-tech/x402-agentpad-sdk';
 
 const client = new X402LaunchClient({
   wallet: { privateKey: process.env.AGENT_PRIVATE_KEY! },
+  executionMode: 'auto',
 });
 
 // Discover tokens
@@ -165,10 +208,11 @@ const runner = new AgentRunner({
 
 ## Best Practices
 
-1. **Start Small** - Test with small amounts first
+1. **Start Small** - Test with small amounts first (1-5 USDC positions)
 2. **Monitor Closely** - Use lifecycle hooks for visibility
 3. **Set Limits** - Always configure position and size limits
 4. **Test Prompts** - Iterate on your trading strategy
 5. **Secure Keys** - Never commit private keys to git
-6. **Fund Wallet** - Ensure enough USDC for trading + AI payments
-
+6. **Fund Wallet** - Ensure enough USDC for trading + AI costs
+7. **Use Templates** - Start with pre-built strategies before customizing
+8. **Check Phases** - Use `onPhaseChange` to debug slow executions

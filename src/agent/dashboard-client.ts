@@ -63,5 +63,16 @@ export class DashboardClient {
       stack: error.stack,
     });
   }
+
+  /**
+   * Notify dashboard of phase change
+   */
+  async notifyPhaseChange(phase: string, details?: string): Promise<void> {
+    await this.send('phase', {
+      phase,
+      details,
+      timestamp: Date.now(),
+    });
+  }
 }
 

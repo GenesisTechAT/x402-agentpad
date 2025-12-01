@@ -4,8 +4,8 @@
 
 /**
  * Transaction execution mode
- * - gasless: Backend pays gas, higher x402 fee (2 USDC for buy/sell)
- * - self-execute: Agent pays gas, lower x402 fee (0.5 USDC for buy/sell)
+ * - gasless: Backend pays gas, x402 fee (0.01 USDC for buy/sell on testnet)
+ * - self-execute: Agent pays gas, x402 fee (0.01 USDC for buy/sell on testnet)
  */
 export type ExecutionMode = 'gasless' | 'self-execute';
 

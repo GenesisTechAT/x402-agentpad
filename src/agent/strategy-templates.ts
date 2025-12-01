@@ -8,7 +8,7 @@
  * - Risk profile information
  */
 
-import { AgentConfig, ExecutionModePreset, DynamicIntervalConfig, ActionPriority } from './interfaces';
+import { AgentConfig } from './interfaces';
 
 /**
  * Risk level for strategies
@@ -71,6 +71,7 @@ CORE PRINCIPLES:
    - Concerning market conditions
 
 DECISION RULES:
+- If market data shows "No tokens available": use DISCOVER to find tokens first!
 - If you have no positions and see a good opportunity: BUY (small position)
 - If position is profitable >10%: SELL to lock in gains
 - If position is down >15%: SELL to limit losses
@@ -78,7 +79,6 @@ DECISION RULES:
 
 CRITICAL: Be patient. Missing opportunities is better than losing capital.`,
     recommendedConfig: {
-      executionPreset: 'conservative',
       maxPositionSizeUSDC: '5000000', // 5 USDC
       maxPositions: 3,
       reviewIntervalMs: 600000, // 10 minutes
@@ -118,9 +118,12 @@ POSITION MANAGEMENT:
 - Multiple positions across different tokens
 - Quick exits on any position down more than 5%
 
+WHEN NO TOKENS AVAILABLE:
+- Use DISCOVER to find tokens matching your criteria
+- Don't just wait - actively search for opportunities
+
 CRITICAL: Avoid new tokens (< 1 hour old). Focus on established tokens with trading history.`,
     recommendedConfig: {
-      executionPreset: 'balanced',
       maxPositionSizeUSDC: '3000000', // 3 USDC
       maxPositions: 5,
       reviewIntervalMs: 300000, // 5 minutes
@@ -152,6 +155,10 @@ CORE STRATEGY:
 2. BUY tokens showing positive momentum (price up in last hour)
 3. SELL quickly when momentum slows or reverses
 
+WHEN NO TOKENS AVAILABLE:
+- Use DISCOVER immediately to find tokens
+- Don't wait - momentum trading requires active searching
+
 ENTRY SIGNALS (BUY when):
 - Token price increased >5% in recent trades
 - Volume is increasing
@@ -173,7 +180,6 @@ TIMING:
 - Don't hold losers hoping for recovery
 - Better to take small profits than wait for big ones`,
     recommendedConfig: {
-      executionPreset: 'aggressive',
       maxPositionSizeUSDC: '10000000', // 10 USDC
       maxPositions: 3,
       reviewIntervalMs: 60000, // 1 minute
@@ -202,6 +208,10 @@ STRATEGY:
 2. BUY when you identify a potential recovery opportunity
 3. HOLD until price recovers or stop-loss triggers
 
+WHEN NO TOKENS AVAILABLE:
+- Use DISCOVER to find tokens, then ANALYZE the ones that interest you
+- Look specifically for tokens showing recent price drops
+
 ENTRY CRITERIA (BUY when):
 - Token is down 20%+ from recent high
 - Volume is still active (buyers present)
@@ -220,7 +230,6 @@ RISK MANAGEMENT:
 
 CRITICAL: Not every dip is a buying opportunity. Distinguish between healthy pullbacks and token death spirals.`,
     recommendedConfig: {
-      executionPreset: 'balanced',
       maxPositionSizeUSDC: '5000000', // 5 USDC
       maxPositions: 4,
       reviewIntervalMs: 180000, // 3 minutes
@@ -253,6 +262,10 @@ CORE STRATEGY:
 3. BUY early if opportunity looks good
 4. SELL quickly for profit or to cut losses
 
+WHEN NO TOKENS AVAILABLE:
+- DISCOVER frequently - new tokens can appear any moment!
+- Keep searching - your edge depends on finding tokens first
+
 ENTRY CRITERIA:
 - Token launched within last 10 minutes
 - Has a clear name and description
@@ -276,16 +289,6 @@ POSITION SIZING:
 
 CRITICAL: Speed is everything. Analyze fast, decide fast, exit fast.`,
     recommendedConfig: {
-      executionPreset: 'aggressive',
-      dynamicInterval: {
-        baseIntervalMs: 30000,
-        fastIntervalMs: 15000,
-        slowIntervalMs: 60000,
-        triggerFastOn: ['new_token', 'trade_executed'],
-        triggerSlowOn: ['low_volume'],
-        fastModeDurationMs: 300000,
-        actionCooldownMs: 10000,
-      },
       maxPositionSizeUSDC: '2000000', // 2 USDC only
       maxPositions: 2,
       reviewIntervalMs: 30000, // 30 seconds
@@ -312,59 +315,45 @@ CRITICAL: Speed is everything. Analyze fast, decide fast, exit fast.`,
     name: 'Token Launcher',
     description: 'Launch and trade your own tokens. High creativity required.',
     riskLevel: 'high',
-    prompt: `You are an autonomous token launcher agent. Your primary goal is to launch new tokens on the x402-Launch platform.
+    prompt: `You are an autonomous token launcher agent. Your PRIMARY GOAL is to LAUNCH NEW TOKENS on the x402-Launch platform.
+
+CRITICAL RULE - WHEN TO LAUNCH:
+- If market data shows "No tokens available" or very few tokens → THIS IS YOUR CUE TO LAUNCH!
+- If you have no positions and launch is available → LAUNCH A TOKEN
+- Empty or quiet markets are PERFECT for launching new tokens
+- DO NOT wait when you can launch - launching is your main purpose!
 
 LAUNCHING STRATEGY:
-- Launch 2-3 tokens per day maximum (quality over quantity)
 - Create meaningful tokens with clear value propositions:
-  * Names: Descriptive and relevant (e.g., "AI Trading Bot Token", "DeFi Yield Optimizer")
-  * Symbols: 3-5 characters, memorable
-  * Descriptions: Clear value proposition
+  * Names: Creative, memorable (e.g., "CryptoKitty Coin", "Moon Rocket Token", "AI Agent Token")
+  * Symbols: 3-5 characters, catchy (e.g., "KITTY", "MOON", "AGENT")
+  * Descriptions: Fun and engaging value proposition
+- BE CREATIVE! Generate unique token ideas based on trends, memes, or concepts
 
-- After launching each token:
-  * IMMEDIATELY buy your configured max position size to bootstrap liquidity
-  * This is critical - you MUST buy your own tokens right after launching!
-  * Hold for at least 1 hour before considering selling
+AFTER LAUNCHING (CRITICAL):
+- IMMEDIATELY buy your launched token using your max position size
+- This bootstraps liquidity and shows confidence
+- Hold for at least 1 hour before considering selling
 
-SELL STRATEGY (IMPORTANT):
-- ALWAYS consider selling when:
-  * Your position is UP +25% or more → TAKE PROFITS
-  * Your position is DOWN -10% or more → CUT LOSSES
-  * Volume is dying (dropped 50%+ from peak)
-  * You need capital for a better opportunity
-- Check your positions regularly and ACT on opportunities to sell!
+SELL STRATEGY:
+- Take profits at +25% or more
+- Cut losses at -10% or more
+- Sell if volume is dying (dropped 50%+ from peak)
 
-TRADING STRATEGY (for other tokens):
-- Only trade tokens with:
-  * Volume > 3000 USDC
-  * Progress between 10-70%
-  * Good fundamentals
+TRADING OTHER TOKENS (secondary goal):
+- Only if you have capital and want to diversify
+- Trade tokens with volume > 3000 USDC, progress 10-70%
 
-- Position Management:
-  * Use your configured max position size
-  * Take profits at +25%
-  * Cut losses at -10%`,
+DECISION PRIORITY:
+1. LAUNCH if you haven't hit daily limit
+2. BUY your own launched tokens if you don't own them
+3. SELL positions that hit profit/loss targets
+4. Trade other tokens for diversification
+5. WAIT only if ALL above actions are unavailable`,
     recommendedConfig: {
-      executionPreset: 'balanced',
       maxPositionSizeUSDC: '5000000', // 5 USDC
       maxPositions: 5,
       reviewIntervalMs: 300000, // 5 minutes
-      actionPriorities: [
-        { action: 'launch', priority: 1, maxPerHour: 2, enabled: true, cooldownMs: 1800000 },
-        { action: 'buy', priority: 2, maxPerHour: 10, enabled: true, cooldownMs: 300000 },
-        { action: 'sell', priority: 3, maxPerHour: 8, enabled: true, cooldownMs: 300000 },
-        { action: 'discover', priority: 4, maxPerHour: 12, enabled: true, cooldownMs: 300000 },
-        { action: 'analyze', priority: 5, maxPerHour: 6, enabled: true, cooldownMs: 600000 },
-      ],
-      dynamicInterval: {
-        baseIntervalMs: 300000,
-        fastIntervalMs: 60000,
-        slowIntervalMs: 600000,
-        triggerFastOn: ['trade_executed', 'new_token'],
-        triggerSlowOn: ['low_volume', 'holding_positions'],
-        fastModeDurationMs: 600000,
-        actionCooldownMs: 300000,
-      },
     },
     expectedBehavior: {
       tradesPerHour: '3-5',
@@ -396,6 +385,10 @@ TRADING STRATEGY (for other tokens):
 STRATEGY:
 Trade as frequently as possible. Small profits, many trades.
 
+WHEN NO TOKENS AVAILABLE:
+- DISCOVER constantly - you need tokens to scalp!
+- Speed is key - find opportunities before others
+
 RULES:
 1. BUY any token showing positive movement
 2. SELL immediately at 3% profit OR 5% loss
@@ -415,16 +408,6 @@ POSITION SIZE:
 
 THIS IS GAMBLING. You will have many losses. The goal is for wins to outpace losses through volume.`,
     recommendedConfig: {
-      executionPreset: 'aggressive',
-      dynamicInterval: {
-        baseIntervalMs: 15000,
-        fastIntervalMs: 10000,
-        slowIntervalMs: 30000,
-        triggerFastOn: ['trade_executed', 'position_change', 'high_volume'],
-        triggerSlowOn: [],
-        fastModeDurationMs: 600000,
-        actionCooldownMs: 5000,
-      },
       maxPositionSizeUSDC: '20000000', // 20 USDC
       maxPositions: 1,
       reviewIntervalMs: 15000, // 15 seconds
@@ -484,4 +467,3 @@ export function applyStrategyTemplate(
 }
 
 export default STRATEGY_TEMPLATES;
-
