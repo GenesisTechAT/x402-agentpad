@@ -807,13 +807,6 @@ export class AgentRunner {
           };
           this.state.positions.push(newPosition);
 
-          // Add delay after successful transaction to avoid nonce collisions
-          const txDelay = this.config.txDelayMs ?? 2000;
-          if (txDelay > 0) {
-            console.log(`[AgentRunner] ⏳ Waiting ${txDelay}ms after buy to avoid nonce collision...`);
-            await this.sleep(txDelay);
-          }
-
           return { success: true, ...buyResult };
         }
 
@@ -872,13 +865,6 @@ export class AgentRunner {
             this.state.positions.splice(positionIndex, 1);
           }
 
-          // Add delay after successful transaction to avoid nonce collisions
-          const txDelaySell = this.config.txDelayMs ?? 2000;
-          if (txDelaySell > 0) {
-            console.log(`[AgentRunner] ⏳ Waiting ${txDelaySell}ms after sell to avoid nonce collision...`);
-            await this.sleep(txDelaySell);
-          }
-
           return { success: true, ...sellResult };
         }
 
@@ -919,13 +905,6 @@ export class AgentRunner {
             if (this.state.launchedTokens.length > 10) {
               this.state.launchedTokens.shift();
             }
-          }
-
-          // Add delay after successful transaction to avoid nonce collisions
-          const txDelayLaunch = this.config.txDelayMs ?? 2000;
-          if (txDelayLaunch > 0) {
-            console.log(`[AgentRunner] ⏳ Waiting ${txDelayLaunch}ms after launch to avoid nonce collision...`);
-            await this.sleep(txDelayLaunch);
           }
 
           return { success: true, ...launchResult };
