@@ -112,8 +112,11 @@ export class X402LaunchClient {
         }
 
         if (!error.response) {
+          // Include the actual error code/message for debugging
+          const errorCode = error.code || 'UNKNOWN';
+          const errorMsg = error.message || 'No response received';
           throw new NetworkError(
-            "Network error - please check your connection"
+            `Network error (${errorCode}): ${errorMsg}`
           );
         }
 
@@ -223,6 +226,16 @@ export class X402LaunchClient {
           const delay = error.retryAfter
             ? error.retryAfter * 1000
             : Math.pow(2, attempt) * 1000; // Exponential backoff
+          await new Promise<void>((resolve) =>
+            setTimeout(() => resolve(), delay)
+          );
+          continue;
+        }
+
+        // Handle network errors with retry (transient failures)
+        if (error instanceof NetworkError && attempt < retries) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 1s, 2s, 4s
+          console.log(`[SDK] Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})...`);
           await new Promise<void>((resolve) =>
             setTimeout(() => resolve(), delay)
           );
