@@ -260,10 +260,10 @@ export class X402LaunchClient {
     // Ensure ticker is uppercase
     const ticker = params.ticker.toUpperCase();
 
-    // Validate ticker format
-    if (!/^[A-Z]{3,10}$/.test(ticker)) {
+    // Validate ticker format (letters and numbers allowed)
+    if (!/^[A-Z0-9]{3,10}$/.test(ticker)) {
       throw new X402LaunchError(
-        `Invalid ticker: ${ticker}. Must be 3-10 uppercase letters only.`,
+        `Invalid ticker: ${ticker}. Must be 3-10 uppercase letters or numbers.`,
         "INVALID_TICKER"
       );
     }
