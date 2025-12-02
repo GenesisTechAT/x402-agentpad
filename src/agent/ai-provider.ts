@@ -105,7 +105,7 @@ export class X402AIProvider implements IAIModelProvider {
         error.error ||
         error.message ||
         response.statusText;
-      throw new Error(`AI Model API error: ${errorMessage}`);
+      throw new Error(`AI Model API error (${response.status}): ${errorMessage} (URL: ${modelApiUrl})`);
     }
 
     const data = (await response.json()) as any;
@@ -151,7 +151,7 @@ export class X402AIProvider implements IAIModelProvider {
   }
 
   /**
-   * Fetch with retry logic for transient network errors
+   * Fetch with retry logic for transient network errors and server errors
    */
   private async fetchWithRetry(
     url: string,
@@ -160,7 +160,18 @@ export class X402AIProvider implements IAIModelProvider {
     backoff = 1000
   ): Promise<Response> {
     try {
-      return await fetch(url, options);
+      const response = await fetch(url, options);
+      
+      // Retry on server errors (500-599) if retries remaining
+      if (!response.ok && response.status >= 500 && response.status < 600 && retries > 0) {
+        console.warn(
+          `[AI Provider] Server error ${response.status} (${response.statusText}), retrying in ${backoff}ms... (${retries} retries left)`
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        return this.fetchWithRetry(url, options, retries - 1, backoff * 2);
+      }
+      
+      return response;
     } catch (error: any) {
       const isRetryable =
         error.cause?.code === "ENOTFOUND" ||

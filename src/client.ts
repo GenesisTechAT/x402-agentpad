@@ -368,7 +368,15 @@ export class X402LaunchClient {
       tokenABI,
       this.provider
     );
-    const tokenName = await tokenContract.name();
+    
+    // Get token name (required for EIP-712 domain)
+    let tokenName: string;
+    try {
+      tokenName = await tokenContract.name();
+    } catch (error: any) {
+      throw new Error(`Failed to get token name for ${params.tokenAddress}. The token contract may not exist or may not be a valid ERC20 token. Error: ${error.message}`);
+    }
+    
     let tokenVersion = "1";
     try {
       tokenVersion = await tokenContract.version();

@@ -43,6 +43,7 @@ export interface AgentConfig {
   // Execution
   reviewIntervalMs: number; // How often to review portfolio
   executionMode?: "gasless" | "self-execute" | "auto"; // Default: 'auto' (detect based on ETH balance)
+  txDelayMs?: number; // Delay after blockchain transactions to avoid nonce collisions (default: 2000ms)
 
   // AI Model configuration
   modelProvider?: string; // 'x402' (recommended), 'openrouter', 'custom'
